@@ -1,0 +1,31 @@
+name: Update FABOT backtest snapshot (daily)
+
+# 2007년부터 지금까지 실전 규칙으로 돌린 시뮬레이션을 매일 다시 계산해서
+# Supabase backtest_snapshot에 저장한다(2026-09-19, fabot-trade-journal
+# 대시보드의 "일별 수익 추이" 자리를 이 데이터로 매일 갱신하기 위함).
+# 장 마감 이후 하루 한 번이면 충분한 작업이라 update-fg.yml처럼 5분 간격
+# 스케줄이 필요 없다.
+
+on:
+  schedule:
+    - cron: "30 22 * * *"  # 매일 22:30 UTC = 07:30 KST
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Compute and save backtest snapshot
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/update_backtest.py
