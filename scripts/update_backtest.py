@@ -156,20 +156,17 @@ def build_result() -> dict:
           f"최종 {final_value:,.0f}원 (배수 {final_value/10_000_000:.1f}배), "
           f"CAGR {cagr*100:.1f}%, MDD {mdd*100:.1f}% ({mdd_date.date()} 근처)")
 
-    STEP = 21
-    points = []
-    for i in range(0, len(history), STEP):
-        points.append({
-            "date": dates[i].strftime("%Y-%m"),
+    # 2026-09-19 사용자 요청: 21거래일(월간) 압축이 아니라 거래일 하루하루를 그대로 점으로
+    # 남긴다("일별을 기준으로") — 19년치라 4,000여 개 점이 되지만 브라우저에서 그리기엔
+    # 문제없는 크기다.
+    points = [
+        {
+            "date": dates[i].strftime("%Y-%m-%d"),
             "value": round(float(history[i])),
             "drawdown": round(float(drawdown[i]), 4),
-        })
-    if (len(history) - 1) % STEP != 0:
-        points.append({
-            "date": dates[-1].strftime("%Y-%m"),
-            "value": round(float(history[-1])),
-            "drawdown": round(float(drawdown[-1]), 4),
-        })
+        }
+        for i in range(len(history))
+    ]
 
     dividend_by_year = pd.Series(dividends, index=dates).groupby(lambda d: d.year).sum()
     yearly_dividends = [
