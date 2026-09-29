@@ -162,6 +162,22 @@
     color: var(--text-secondary);
   }
 
+  .gauge-wrap {
+    display: flex;
+    justify-content: center;
+    line-height: 0;
+  }
+
+  .gauge-caption {
+    text-align: center;
+    font-weight: 700;
+    font-size: 15px;
+    margin: 4px 0 0;
+  }
+  .gauge-caption.fear-side { color: var(--diverge-red); }
+  .gauge-caption.greed-side { color: var(--diverge-blue); }
+  .gauge-caption.neutral-side { color: var(--text-secondary); }
+
   .signal-line {
     margin-top: 14px;
     font-size: 15px;
@@ -365,10 +381,8 @@
       <p class="hero-label">오늘의 F&G 지수</p>
       <span class="hero-updated" id="updated-note"></span>
     </div>
-    <div class="hero-row">
-      <span class="hero-figure" id="hero-score">–</span>
-      <span class="rating-badge" id="rating-badge">–</span>
-    </div>
+    <div class="gauge-wrap" id="gauge-wrap"></div>
+    <p class="gauge-caption" id="gauge-caption">–</p>
     <p class="signal-line" hidden>판정 신호: <strong id="signal-text">–</strong></p>
   </section>
 
@@ -843,6 +857,135 @@
     "greed": "탐욕", "extreme greed": "극단적 탐욕",
   };
 
+  // 반원 게이지 SVG — fabot-trade-journal(public/app.js)의 buildGaugeSvg를 그대로 옮겨왔다.
+  const GAUGE_CX = 180;
+  const GAUGE_CY = 190;
+  const GAUGE_R_OUTER = 166;
+  const GAUGE_R_INNER = 55;
+  const ZONE_GAP = 0.8;
+
+  const GAUGE_ZONES = [
+    { min: 0, max: 24.5, lines: ["극단적", "공포"], fill: "#eb9a86", stroke: "#d97552", text: "#7a3a22" },
+    { min: 24.5, max: 44.5, lines: ["공포"], fill: "#f2c9a8", stroke: "#dba872", text: "#8a5a2a" },
+    { min: 44.5, max: 55.5, lines: ["중립"], fill: "#ece6d6", stroke: "#c7bd9e", text: "#5c5640" },
+    { min: 55.5, max: 75.5, lines: ["탐욕"], fill: "#cbe3b8", stroke: "#a0c987", text: "#3f5c2c" },
+    { min: 75.5, max: 100, lines: ["극단적", "탐욕"], fill: "#8fca86", stroke: "#5fa855", text: "#254a1e" },
+  ];
+
+  function gaugePolarPoint(radius, value) {
+    const angleDeg = 180 - (value / 100) * 180;
+    const angleRad = (angleDeg * Math.PI) / 180;
+    return {
+      x: GAUGE_CX + radius * Math.cos(angleRad),
+      y: GAUGE_CY - radius * Math.sin(angleRad),
+    };
+  }
+
+  function gaugeSectorPath(minValue, maxValue) {
+    const a = minValue + ZONE_GAP;
+    const b = maxValue - ZONE_GAP;
+    const outerStart = gaugePolarPoint(GAUGE_R_OUTER, a);
+    const outerEnd = gaugePolarPoint(GAUGE_R_OUTER, b);
+    const innerEnd = gaugePolarPoint(GAUGE_R_INNER, b);
+    const innerStart = gaugePolarPoint(GAUGE_R_INNER, a);
+    return (
+      `M ${outerStart.x.toFixed(1)} ${outerStart.y.toFixed(1)} ` +
+      `A ${GAUGE_R_OUTER} ${GAUGE_R_OUTER} 0 0 1 ${outerEnd.x.toFixed(1)} ${outerEnd.y.toFixed(1)} ` +
+      `L ${innerEnd.x.toFixed(1)} ${innerEnd.y.toFixed(1)} ` +
+      `A ${GAUGE_R_INNER} ${GAUGE_R_INNER} 0 0 0 ${innerStart.x.toFixed(1)} ${innerStart.y.toFixed(1)} Z`
+    );
+  }
+
+  function gaugeFindZoneIndex(score) {
+    const clamped = Math.max(0, Math.min(100, score));
+    const idx = GAUGE_ZONES.findIndex((z) => clamped >= z.min && clamped < z.max);
+    return idx === -1 ? GAUGE_ZONES.length - 1 : idx;
+  }
+
+  function buildGaugeSvg(score) {
+    const activeIdx = gaugeFindZoneIndex(score);
+
+    const sectors = GAUGE_ZONES.map((zone, i) => {
+      const active = i === activeIdx;
+      const fill = active ? zone.fill : "#ffffff";
+      const stroke = active ? zone.stroke : "#e1e0d9";
+      return `<path d="${gaugeSectorPath(zone.min, zone.max)}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />`;
+    }).join("");
+
+    const ZONE_LABEL_R = (GAUGE_R_OUTER + GAUGE_R_INNER) / 2;
+    const LINE_STEP = 11;
+
+    function labelArcPathId(radius) {
+      return `zoneLabelArc${Math.round(radius * 10)}`;
+    }
+    function labelArcDefFor(radius) {
+      const start = gaugePolarPoint(radius, 0);
+      const end = gaugePolarPoint(radius, 100);
+      return `<path id="${labelArcPathId(radius)}" fill="none"
+        d="M ${start.x.toFixed(1)} ${start.y.toFixed(1)}
+           A ${radius} ${radius} 0 0 1 ${end.x.toFixed(1)} ${end.y.toFixed(1)}" />`;
+    }
+
+    const usedRadii = new Set();
+    GAUGE_ZONES.forEach((zone) => {
+      if (zone.lines.length === 1) {
+        usedRadii.add(ZONE_LABEL_R);
+      } else {
+        usedRadii.add(ZONE_LABEL_R + LINE_STEP);
+        usedRadii.add(ZONE_LABEL_R - LINE_STEP);
+      }
+    });
+    const labelArcDef = [...usedRadii].map(labelArcDefFor).join("");
+
+    const zoneLabels = GAUGE_ZONES.map((zone, i) => {
+      const active = i === activeIdx;
+      const mid = (zone.min + zone.max) / 2;
+      const fill = active ? zone.text : "#4a4844";
+      const radii = zone.lines.length === 1 ? [ZONE_LABEL_R] : [ZONE_LABEL_R + LINE_STEP, ZONE_LABEL_R - LINE_STEP];
+      return zone.lines
+        .map((line, li) => `<text font-size="13" font-weight="800" fill="${fill}">
+          <textPath href="#${labelArcPathId(radii[li])}" startOffset="${mid}%" text-anchor="middle" letter-spacing="0.5">${line}</textPath>
+        </text>`)
+        .join("");
+    }).join("");
+
+    const tickMarks = [0, 25, 50, 75, 100]
+      .map((v) => {
+        const dot = gaugePolarPoint(GAUGE_R_OUTER, v);
+        const isEdge = v === 0 || v === 100;
+        const label = gaugePolarPoint(GAUGE_R_OUTER + (isEdge ? 30 : 24), v);
+        const anchor = v <= 10 ? "start" : v >= 90 ? "end" : "middle";
+        const dy = isEdge ? 18 : 0;
+        return (
+          `<circle cx="${dot.x.toFixed(1)}" cy="${dot.y.toFixed(1)}" r="3" fill="#c7c4b8" />` +
+          `<text x="${label.x.toFixed(1)}" y="${(label.y + dy).toFixed(1)}" text-anchor="${anchor}" font-size="16" font-weight="800" fill="#0b0b0b">${v}</text>`
+        );
+      })
+      .join("");
+
+    const clampedScore = Math.max(0, Math.min(100, score));
+    const needleTip = gaugePolarPoint(GAUGE_R_INNER + (GAUGE_R_OUTER - GAUGE_R_INNER) * 0.6, clampedScore);
+    const needleAngle = (180 - (clampedScore / 100) * 180 + 90) * (Math.PI / 180);
+    const perpX = Math.cos(needleAngle) * 5;
+    const perpY = -Math.sin(needleAngle) * 5;
+
+    return `
+      <svg viewBox="-50 -22 461 269" style="width: 100%; height: auto; max-width: 380px; display: block;">
+        <defs>${labelArcDef}</defs>
+        ${sectors}
+        ${zoneLabels}
+        ${tickMarks}
+        <path d="M ${(GAUGE_CX - perpX).toFixed(1)} ${(GAUGE_CY - perpY).toFixed(1)}
+          L ${needleTip.x.toFixed(1)} ${needleTip.y.toFixed(1)}
+          L ${(GAUGE_CX + perpX).toFixed(1)} ${(GAUGE_CY + perpY).toFixed(1)} Z"
+          fill="#2b2a27" />
+        <circle cx="${GAUGE_CX}" cy="${GAUGE_CY}" r="9" fill="#2b2a27" />
+        <circle cx="${GAUGE_CX}" cy="${GAUGE_CY}" r="4" fill="#fcfcfb" />
+        <text x="${GAUGE_CX}" y="${GAUGE_CY + 46}" text-anchor="middle" font-size="40" font-weight="800" fill="#0b0b0b">${score.toFixed(0)}</text>
+      </svg>
+    `;
+  }
+
   function ratingSide(score) {
     if (score < 45) return "fear-side";
     if (score > 55) return "greed-side";
@@ -863,11 +1006,10 @@
   let currentHero = { score: today.score, rating: today.rating, signal: today.signal };
 
   function renderHero(whenLabel) {
-    document.getElementById("hero-score").textContent = currentHero.score.toFixed(1);
-    const badge = document.getElementById("rating-badge");
-    badge.className = "rating-badge";
-    badge.textContent = RATING_LABELS[currentHero.rating] || currentHero.rating;
-    badge.classList.add(ratingSide(currentHero.score));
+    document.getElementById("gauge-wrap").innerHTML = buildGaugeSvg(currentHero.score);
+    const caption = document.getElementById("gauge-caption");
+    caption.className = "gauge-caption " + ratingSide(currentHero.score);
+    caption.textContent = RATING_LABELS[currentHero.rating] || currentHero.rating;
     document.getElementById("signal-text").textContent = currentHero.signal;
     document.getElementById("updated-note").textContent = whenLabel;
   }
